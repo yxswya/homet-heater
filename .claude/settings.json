@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bunx drizzle-kit generate)",
+      "Bash(sqlite3 video-library.db \"SELECT id, title, type FROM videos LIMIT 10;\")",
+      "Bash(sqlite3 video-library.db \"SELECT * FROM episodes;\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, title, type, path FROM videos;\")",
+      "Bash(lsof -ti:3000)",
+      "Bash(ffmpeg -version)",
+      "Bash(ffmpeg -h help)",
+      "Bash(sqlite3 data.db \"SELECT id, video_id, is_complete, cache_path FROM hls_cache;\")",
+      "Bash(sqlite3 data.db \".tables\")",
+      "Bash(sqlite3 video-library.db \".tables\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, video_id, is_complete, cache_path FROM hls_cache;\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, title, path FROM videos LIMIT 5;\")",
+      "Bash(sqlite3 video-library.db \"DELETE FROM hls_cache;\")",
+      "Bash(sqlite3 video-library.db \"SELECT COUNT\\(*\\) as count FROM hls_cache;\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, video_id, is_complete, qualities FROM hls_cache;\")",
+      "Bash(cat hls-cache/*/master.m3u8)",
+      "Bash(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 hls-cache/4ba16cc93e08/360p/segment_000.ts)",
+      "Bash(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 hls-cache/4ba16cc93e08/480p/segment_000.ts)",
+      "Bash(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 \"target/爱情怎么翻译？/【韩剧】爱情怎么翻译？第一集.mp4\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, video_id, cache_path, is_complete FROM hls_cache;\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, video_id, cache_path FROM hls_cache;\")",
+      "Bash(sqlite3 video-library.db \"SELECT id, title, path FROM videos;\")",
+      "Read(//Users/mac/Documents/yxswy-test/homet-heater/sha1920/app/**)",
+      "Bash(done)",
+      "Bash(sqlite3 video-library.db \"SELECT id, title, duration, width, height, codec, bitrate, fps, size FROM videos WHERE title LIKE ''%钢铁侠%'';\")",
+      "Bash(lsof -i :3000)",
+      "Bash(perl -i -pe 's/^\\\\s*console\\\\.\\\\w+\\\\\\([^\\)]*\\\\\\);\\\\s*$//g' lib/transcode-service.ts server.ts video-scanner.ts templates/play.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^\\)]*\\\\\\);//g' lib/transcode-service.ts server.ts video-scanner.ts templates/play.ts)",
+      "Bash(perl -i -pe 's/;\\\\s*;/;/g; s/\\\\s*\\\\n\\\\s*\\\\n/\\\\n/g;' lib/transcode-service.ts server.ts video-scanner.ts templates/play.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^;]*\\\\\\);//g' lib/transcode-service.ts server.ts video-scanner.ts templates/play.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^`]*`[^;]*\\\\\\);//g' lib/transcode-service.ts server.ts video-scanner.ts templates/play.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^;]*\\\\\\);//g' db/index.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^`]*`[^;]*\\\\\\);//g' db/index.ts)",
+      "Bash(grep -c \"console\\\\.\" /Users/mac/Documents/yxswy-test/homet-heater/sha1920/app/*.ts /Users/mac/Documents/yxswy-test/homet-heater/sha1920/app/**/*.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^;]*\\\\\\);//g' thumbnail-extractor.ts tmdb-fetcher.ts)",
+      "Bash(perl -i -pe 's/console\\\\.\\\\w+\\\\\\([^`]*`[^;]*\\\\\\);//g' thumbnail-extractor.ts tmdb-fetcher.ts)",
+      "Bash(perl -i -pe 's/\\\\\\\\`/${/g' /Users/mac/Documents/yxswy-test/homet-heater/sha1920/app/public/play.html)"
+    ],
+    "additionalDirectories": [
+      "/Users/mac/Documents/yxswy-test/homet-heater/sha1920/app"
+    ]
+  }
+}

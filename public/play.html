@@ -1,0 +1,2748 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频播放</title>
+    <!-- mpegts.js 用于播放 MPEG-TS 视频流 -->
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
+    <!-- HLS.js 用于播放 HLS 视频流 - 使用稳定版本 -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12/dist/hls.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f0f0f;
+            --card-bg: #1a1a1a;
+            --primary-color: #ff0000;
+            --text-main: #ffffff;
+            --text-dim: #aaaaaa;
+            --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        /* 隐藏主页面滚动条 */
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            display: none;
+        }
+
+        html,
+        body {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* ==================== 播放区域 ==================== */
+        .player-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .video-container {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 播放器 */
+        #video-player {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000;
+        }
+
+        /* 播放器封面 */
+        .player-cover {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: var(--transition);
+            z-index: 2;
+        }
+
+        .player-cover::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--cover-image, url('https://picsum.photos/seed/play/1280/720')) center/cover;
+            opacity: 0.3;
+            z-index: 0;
+        }
+
+        .cover-message {
+            position: relative;
+            z-index: 1;
+            color: #fff;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        .player-cover.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* 控制条 - 鼠标悬停时显示 */
+        .player-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
+            padding: 40px 20px 20px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .video-container:hover .player-controls {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* 进度条 */
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            cursor: pointer;
+            margin-bottom: 12px;
+            position: relative;
+            transition: height 0.15s ease;
+        }
+
+        .progress-bar:hover {
+            height: 8px;
+        }
+
+        .progress-current {
+            height: 100%;
+            background: var(--primary-color);
+            border-radius: 3px;
+            position: relative;
+            width: 0%;
+            transition: width 0.05s linear;
+        }
+
+        .progress-bar.dragging .progress-current {
+            transition: none;
+        }
+
+        .progress-current::after {
+            content: '';
+            position: absolute;
+            right: -7px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            background: #fff;
+            border: 3px solid var(--primary-color);
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .progress-bar:hover .progress-current::after,
+        .progress-bar.dragging .progress-current::after {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.1);
+        }
+
+        /* 进度条预览时间 */
+        .progress-preview {
+            position: absolute;
+            bottom: 100%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            margin-bottom: 8px;
+            white-space: nowrap;
+        }
+
+        .progress-bar:hover .progress-preview,
+        .progress-bar.dragging .progress-preview {
+            opacity: 1;
+        }
+
+        /* 控制按钮行 */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .control-btn {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: var(--transition);
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .control-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: var(--text-main);
+        }
+
+        .control-btn.play-pause svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .time-display {
+            color: var(--text-main);
+            font-size: 13px;
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        /* 分辨率指示器 */
+        .quality-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(255, 0, 0, 0.15);
+            border: 1px solid rgba(255, 0, 0, 0.3);
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #ff4757;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .quality-indicator .quality-icon {
+            width: 14px;
+            height: 14px;
+        }
+
+        .quality-indicator.direct {
+            background: rgba(255, 165, 0, 0.15);
+            border-color: rgba(255, 165, 0, 0.3);
+            color: #ffa500;
+        }
+
+        .quality-indicator .quality-label {
+            font-weight: 600;
+        }
+
+        .quality-indicator .quality-source {
+            font-size: 10px;
+            opacity: 0.7;
+            font-weight: 400;
+            margin-left: 2px;
+        }
+
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .volume-slider {
+            width: 80px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            cursor: pointer;
+            position: relative;
+            transition: height 0.15s ease;
+        }
+
+        .volume-slider:hover {
+            height: 6px;
+        }
+
+        .volume-current {
+            height: 100%;
+            background: #fff;
+            border-radius: 2px;
+            width: 70%;
+            position: relative;
+            transition: width 0.05s linear;
+        }
+
+        .volume-slider.dragging .volume-current {
+            transition: none;
+        }
+
+        .volume-current::after {
+            content: '';
+            position: absolute;
+            right: -5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 10px;
+            height: 10px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .volume-slider:hover .volume-current::after,
+        .volume-slider.dragging .volume-current::after {
+            opacity: 1;
+        }
+
+        /* 画质选择器 */
+        .quality-selector {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .quality-btn {
+            width: auto !important;
+            min-width: 60px;
+            padding: 0 8px !important;
+            border-radius: 4px !important;
+            gap: 4px;
+        }
+
+        .quality-btn-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-main);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .quality-dropdown {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            padding: 8px 0;
+            min-width: 140px;
+            display: none;
+            flex-direction: column;
+            margin-bottom: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+        }
+
+        .quality-dropdown.show {
+            display: flex;
+        }
+
+        .quality-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            color: var(--text-main);
+            font-size: 13px;
+        }
+
+        .quality-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .quality-option.active {
+            background: rgba(255, 0, 0, 0.15);
+            color: #ff4757;
+        }
+
+        .quality-option.switching {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .quality-option.switching::after {
+            content: '切换中...';
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        .quality-btn.switching {
+            position: relative;
+            color: #ffaa00;
+            animation: qualityPulse 1s ease-in-out infinite;
+        }
+
+        .quality-btn.switching::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 14px;
+            height: 14px;
+            margin: -7px 0 0 -7px;
+            border: 2px solid transparent;
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .quality-btn.switching .quality-btn-label {
+            opacity: 0.5;
+        }
+
+        @keyframes qualityPulse {
+            0%, 100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(255, 170, 0, 0.4);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 8px rgba(255, 170, 0, 0);
+            }
+        }
+
+        .quality-option-label {
+            flex: 1;
+        }
+
+        .quality-option-auto {
+            font-size: 10px;
+            opacity: 0.6;
+            text-transform: uppercase;
+        }
+
+        /* 视频信息 */
+        .video-info {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .video-title {
+            font-size: 22px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .video-meta {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .video-description {
+            font-size: 14px;
+            color: #999;
+            line-height: 1.7;
+        }
+
+        /* 视频技术信息 */
+        .video-tech-info {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px 24px;
+            padding: 16px 0;
+            margin-bottom: 16px;
+            border-top: 1px solid #222;
+            border-bottom: 1px solid #222;
+        }
+
+        .tech-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .tech-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tech-value {
+            font-size: 14px;
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        /* ==================== 元数据按钮 ==================== */
+        .metadata-toggle-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-dim);
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .metadata-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: var(--text-main);
+        }
+
+        .metadata-toggle-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* ==================== 元数据弹窗（毛玻璃效果） ==================== */
+        .metadata-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .metadata-modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .metadata-modal {
+            position: relative;
+            width: 90%;
+            max-width: 420px;
+            background: rgba(26, 26, 26, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+            transform: scale(0.95) translateY(20px);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .metadata-modal-overlay.active .metadata-modal {
+            transform: scale(1) translateY(0);
+        }
+
+        .metadata-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .metadata-modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .metadata-modal-title svg {
+            width: 20px;
+            height: 20px;
+            color: var(--text-dim);
+        }
+
+        .metadata-modal-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-dim);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .metadata-modal-close:hover {
+            background: rgba(255, 0, 0, 0.2);
+            color: #ff4757;
+        }
+
+        .metadata-modal-close svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .metadata-modal-content {
+            padding: 24px;
+        }
+
+        .modal-tech-info {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .modal-tech-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .modal-tech-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-tech-label {
+            font-size: 13px;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-tech-value {
+            font-size: 15px;
+            color: var(--text-main);
+            font-weight: 600;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+        }
+
+        /* ==================== 键盘快捷键帮助弹窗 ==================== */
+        .keyboard-help-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .keyboard-help-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .keyboard-help-modal {
+            background: rgba(26, 26, 26, 0.95);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 420px;
+            width: 90%;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .keyboard-help-overlay.active .keyboard-help-modal {
+            transform: scale(1);
+        }
+
+        .keyboard-help-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .keyboard-help-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .keyboard-help-title svg {
+            width: 24px;
+            height: 24px;
+            color: var(--primary-color);
+        }
+
+        .keyboard-help-close {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .keyboard-help-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .keyboard-help-close svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .keyboard-help-content {
+            padding: 16px 24px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .shortcut-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .shortcut-item kbd {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 32px;
+            padding: 4px 10px;
+            background: linear-gradient(180deg, #3a3a3a 0%, #2a2a2a 100%);
+            border: 1px solid #4a4a4a;
+            border-radius: 6px;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .shortcut-item span {
+            font-size: 14px;
+            color: var(--text-dim);
+        }
+
+        /* ==================== 侧边栏 ==================== */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+        }
+
+        .sidebar-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #222;
+        }
+
+        .sidebar-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .episode-count {
+            font-size: 12px;
+            color: var(--text-dim);
+            padding: 4px 10px;
+            background: #252525;
+            border-radius: 12px;
+        }
+
+        /* 集数列表 - 横向布局 */
+        .episodes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            padding: 4px;
+            margin: -4px;
+            max-height: 500px;
+        }
+
+        /* 自定义滚动条 */
+        .episodes-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .episodes-list::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 3px;
+        }
+
+        .episodes-list::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+
+        .episodes-list::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+
+        .episodes-list {
+            -ms-overflow-style: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #333 #1a1a1a;
+        }
+
+        .episode-item {
+            display: flex;
+            gap: 12px;
+            padding: 6px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            position: relative;
+            user-select: none;
+        }
+
+        .episode-item:hover {
+            background: #252525;
+        }
+
+        .episode-item.active {
+            background: rgba(255, 0, 0, 0.08);
+            box-shadow: 0 0 0 1px var(--primary-color);
+        }
+
+        .episode-item.active .ep-title {
+            color: var(--primary-color);
+        }
+
+        .ep-thumb {
+            width: 120px;
+            aspect-ratio: 16 / 9;
+            background: #333;
+            border-radius: 4px;
+            flex-shrink: 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .ep-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .ep-duration {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 2px 6px;
+            font-size: 11px;
+            border-radius: 3px;
+        }
+
+        .ep-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding-left: 4px;
+        }
+
+        .ep-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 4px;
+            display: -webkit-box;
+            line-clamp: 2;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        .ep-time {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* 推荐视频 */
+        .rec-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .rec-item {
+            display: flex;
+            gap: 12px;
+            padding: 6px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition);
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .rec-item:hover {
+            background: #252525;
+        }
+
+        .rec-thumb {
+            width: 140px;
+            aspect-ratio: 16 / 9;
+            background: #333;
+            border-radius: 4px;
+            flex-shrink: 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .rec-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .rec-duration {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 2px 6px;
+            font-size: 11px;
+            border-radius: 3px;
+        }
+
+        .rec-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .rec-title {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            display: -webkit-box;
+            line-clamp: 2;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        .rec-meta {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        /* 加载状态 */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 50vh;
+            color: var(--text-dim);
+        }
+
+        /* Toast 通知样式 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: rgba(30, 30, 30, 0.95);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+            animation: toastSlideIn 0.3s ease-out;
+            max-width: 400px;
+        }
+
+        .toast.removing {
+            animation: toastSlideOut 0.3s ease-in forwards;
+        }
+
+        @keyframes toastSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes toastSlideOut {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
+
+        .toast-icon {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-icon.error {
+            color: #ff4444;
+        }
+
+        .toast-icon.success {
+            color: #44ff44;
+        }
+
+        .toast-icon.info {
+            color: #4488ff;
+        }
+
+        .toast-icon.loading {
+            color: #ffaa44;
+            animation: toastSpin 1s linear infinite;
+        }
+
+        .toast.loading {
+            background: rgba(40, 30, 20, 0.95);
+            border: 1px solid rgba(255, 170, 68, 0.3);
+        }
+
+        @keyframes toastSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* 视频播放器加载遮罩 */
+        .player-loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+            backdrop-filter: blur(2px);
+        }
+
+        .player-loading-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .player-loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.15);
+            border-top-color: #ffaa00;
+            border-right-color: #ffaa00;
+            border-radius: 50%;
+            animation: playerSpin 0.8s linear infinite;
+        }
+
+        @keyframes playerSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        .toast-message {
+            color: #fff;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+
+            .container {
+                gap: 16px;
+                grid-template-columns: 1fr 300px;
+            }
+
+            .ep-thumb,
+            .rec-thumb {
+                width: 100px;
+            }
+
+            .episodes-list {
+                max-height: 250px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                gap: 12px;
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+                max-height: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading" id="loading">加载中...</div>
+
+    <!-- Toast 通知容器 -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <div class="container" id="app" style="display: none;">
+        <!-- 左侧播放区域 -->
+        <div class="player-section">
+            <!-- 播放器 -->
+            <div class="video-container" id="video-container">
+                <video id="video-player" preload="metadata"></video>
+
+                <!-- 质量切换加载遮罩 -->
+                <div class="player-loading-overlay" id="player-loading-overlay">
+                    <div class="player-loading-spinner"></div>
+                </div>
+
+                <!-- 播放器封面 -->
+                <div class="player-cover" id="player-cover">
+                    <div class="cover-message" id="cover-message" style="display: none;"></div>
+                </div>
+
+                <!-- 控制条 -->
+                <div class="player-controls">
+                    <div class="progress-bar" id="progress-bar">
+                        <div class="progress-current" id="progress-current"></div>
+                        <div class="progress-preview" id="progress-preview">0:00</div>
+                    </div>
+                    <div class="controls-row">
+                        <button class="control-btn play-pause" id="play-pause-btn">
+                            <svg viewBox="0 0 24 24" id="play-icon">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </button>
+                        <button class="control-btn" id="mute-btn">
+                            <svg viewBox="0 0 24 24" id="volume-icon">
+                                <path
+                                    d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                            </svg>
+                        </button>
+                        <div class="volume-control">
+                            <div class="volume-slider" id="volume-slider">
+                                <div class="volume-current" id="volume-current"></div>
+                            </div>
+                        </div>
+                        <!-- 画质选择器 -->
+                        <div class="quality-selector" id="quality-selector">
+                            <button class="control-btn quality-btn" id="quality-btn">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                </svg>
+                                <span class="quality-btn-label" id="quality-btn-label">AUTO</span>
+                            </button>
+                            <div class="quality-dropdown" id="quality-dropdown">
+                                <div class="quality-option" data-level="-1">
+                                    <span class="quality-option-label">自动</span>
+                                    <span class="quality-option-auto">AUTO</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="control-btn" id="fullscreen-btn">
+                            <svg viewBox="0 0 24 24">
+                                <path
+                                    d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                            </svg>
+                        </button>
+                        <button class="control-btn" id="keyboard-help-btn" title="键盘快捷键 (?)">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>
+                            </svg>
+                        </button>
+                        <span class="time-display">
+                            <span class="quality-indicator" id="quality-indicator">
+                                <svg class="quality-icon" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                </svg>
+                                <span class="quality-label" id="quality-label">--</span>
+                                <span class="quality-source" id="quality-source"></span>
+                            </span>
+                            <span id="current-time">0:00</span> / <span id="duration">0:00</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 视频信息 -->
+            <div class="video-info">
+                <h1 class="video-title" id="video-title">加载中...</h1>
+                <div class="video-meta">
+                    <span id="video-views">0次观看</span>
+                    <span id="video-date">刚刚</span>
+                    <button class="metadata-toggle-btn" id="metadata-toggle-btn" style="display: none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M12 16v-4M12 8h.01"></path>
+                        </svg>
+                        <span>元数据</span>
+                    </button>
+                </div>
+
+                <div class="video-description" id="video-description"></div>
+            </div>
+        </div>
+
+        <!-- 右侧边栏 -->
+        <aside class="sidebar">
+            <!-- 选集 -->
+            <div class="sidebar-card" id="episodes-card" style="display: none;">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">选集</span>
+                    <span class="episode-count" id="episode-total">0集</span>
+                </div>
+                <div class="episodes-list" id="episodes-list"></div>
+            </div>
+
+            <!-- 推荐视频 -->
+            <div class="sidebar-card">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">相关推荐</span>
+                </div>
+                <div class="rec-list" id="rec-list"></div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- 元数据弹窗（毛玻璃效果） -->
+    <div class="metadata-modal-overlay" id="metadata-modal-overlay">
+        <div class="metadata-modal">
+            <div class="metadata-modal-header">
+                <div class="metadata-modal-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 16v-4M12 8h.01"></path>
+                    </svg>
+                    <span>视频元数据</span>
+                </div>
+                <button class="metadata-modal-close" id="metadata-modal-close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="metadata-modal-content">
+                <div class="modal-tech-info">
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+                                <path d="M8 21h8M12 17v4"></path>
+                            </svg>
+                            分辨率
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-resolution">-</span>
+                    </div>
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 6v6l4 2"></path>
+                            </svg>
+                            时长
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-duration">-</span>
+                    </div>
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"></path>
+                            </svg>
+                            大小
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-size">-</span>
+                    </div>
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 18V5l12 7-12 6z"></path>
+                            </svg>
+                            编码
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-codec">-</span>
+                    </div>
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                            </svg>
+                            比特率
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-bitrate">-</span>
+                    </div>
+                    <div class="modal-tech-item">
+                        <span class="modal-tech-label">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                <path d="M4 12h16M12 4v16"></path>
+                            </svg>
+                            帧率
+                        </span>
+                        <span class="modal-tech-value" id="modal-tech-fps">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 键盘快捷键帮助弹窗 -->
+    <div class="keyboard-help-overlay" id="keyboard-help-overlay">
+        <div class="keyboard-help-modal">
+            <div class="keyboard-help-header">
+                <div class="keyboard-help-title">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
+                    </svg>
+                    <span>键盘快捷键</span>
+                </div>
+                <button class="keyboard-help-close" id="keyboard-help-close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="keyboard-help-content">
+                <div class="shortcut-item">
+                    <kbd>空格</kbd>
+                    <span>播放 / 暂停</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>←</kbd>
+                    <span>后退 5 秒</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>→</kbd>
+                    <span>前进 5 秒</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>↑</kbd>
+                    <span>音量 +5%</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>↓</kbd>
+                    <span>音量 -5%</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>M</kbd>
+                    <span>静音 / 取消静音</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>F</kbd>
+                    <span>全屏 / 退出全屏</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>?</kbd>
+                    <span>显示/隐藏帮助</span>
+                </div>
+                <div class="shortcut-item">
+                    <kbd>0-9</kbd>
+                    <span>跳转到进度 (0%=0, 9%=90%)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 共享数据
+        let videoData = null;
+        let currentVideo = null;
+        let currentEpisode = 0;
+        let pendingSeekPercent = null; // 待应用的进度（视频加载后使用）
+
+        // HLS 相关状态
+        let hlsCheckInterval = null;  // HLS 状态轮询定时器
+        let isUsingHls = false;       // 是否正在使用 HLS 播放
+        let currentVideoPath = null;  // 当前视频路径
+        let currentStreamVideoId = null;  // 当前实时流的 videoId
+
+        // 播放器状态（需要在模块级别，避免重复绑定事件）
+        let playerInitialized = false;
+        let isDraggingProgress = false;
+        let isDraggingVolume = false;
+
+        // ==================== Toast 通知系统 ====================
+        const Toast = {
+            container: null,
+            toasts: [],
+
+            init() {
+                this.container = document.getElementById('toast-container');
+            },
+
+            show(message, type = 'info', duration = 3000) {
+                if (!this.container) this.init();
+
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+
+                let icon = '';
+                switch (type) {
+                    case 'error':
+                        icon = '<svg class="toast-icon error" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>';
+                        break;
+                    case 'success':
+                        icon = '<svg class="toast-icon success" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>';
+                        break;
+                    case 'loading':
+                        icon = '<svg class="toast-icon loading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/></svg>';
+                        break;
+                    default:
+                        icon = '<svg class="toast-icon info" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>';
+                }
+
+                toast.innerHTML = icon + '<span class="toast-message">' + message + '</span>';
+                this.container.appendChild(toast);
+
+                if (duration > 0) {
+                    setTimeout(() => this.remove(toast), duration);
+                }
+
+                return toast;
+            },
+
+            remove(toast) {
+                if (!toast || !toast.parentNode) return;
+                toast.classList.add('removing');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            },
+
+            error(message, duration) {
+                return this.show(message, 'error', duration);
+            },
+
+            success(message, duration) {
+                return this.show(message, 'success', duration);
+            },
+
+            info(message, duration) {
+                return this.show(message, 'info', duration);
+            },
+
+            loading(message) {
+                return this.show(message, 'loading', 0); // 不自动消失
+            }
+        };
+
+        // ==================== 质量指示器 ====================
+        // 更新质量指示器显示
+        function updateQualityIndicator(quality, source = 'hls') {
+            const indicator = document.getElementById('quality-indicator');
+            const label = document.getElementById('quality-label');
+            const sourceSpan = document.getElementById('quality-source');
+
+            if (!indicator || !label) return;
+
+            if (quality) {
+                label.textContent = quality;
+                if (source === 'direct') {
+                    sourceSpan.textContent = '(直连)';
+                    indicator.classList.add('direct');
+                } else {
+                    sourceSpan.textContent = '(HLS)';
+                    indicator.classList.remove('direct');
+                }
+                indicator.style.display = 'flex';
+            } else {
+                label.textContent = '--';
+                sourceSpan.textContent = '';
+            }
+        }
+
+        // 从视频尺寸获取质量标签
+        function getQualityLabel(width, height) {
+            if (!width || !height) return '?';
+
+            if (height >= 2160) return '4K';
+            if (height >= 1080) return '1080p';
+            if (height >= 720) return '720p';
+            if (height >= 480) return '480p';
+            if (height >= 360) return '360p';
+            return height + 'p';
+        }
+
+        // ==================== 画质选择器 ====================
+        let currentHlsLevels = [];  // 存储当前可用的画质级别
+        let currentHlsInstance = null;  // 存储 HLS 实例
+
+        // 初始化画质选择器
+        function initQualitySelector(hls) {
+            currentHlsInstance = hls;
+            const dropdown = document.getElementById('quality-dropdown');
+            const qualityBtn = document.getElementById('quality-btn');
+            const qualityBtnLabel = document.getElementById('quality-btn-label');
+
+            if (!dropdown || !qualityBtn) return;
+
+            // 清空现有选项
+            dropdown.innerHTML = '';
+
+            // 添加自动选项
+            const autoOption = document.createElement('div');
+            autoOption.className = 'quality-option';
+            autoOption.dataset.level = '-1';
+            autoOption.innerHTML = '<span class="quality-option-label">自动</span><span class="quality-option-auto">AUTO</span>';
+            autoOption.addEventListener('click', () => switchQuality(-1));
+            dropdown.appendChild(autoOption);
+
+            // 添加画质选项（从高到低排序）
+            const levels = [...hls.levels].sort((a, b) => b.height - a.height);
+            currentHlsLevels = levels;
+
+            levels.forEach((level, index) => {
+                const quality = getQualityLabel(level.width, level.height);  // 修复参数顺序
+                const originalIndex = hls.levels.indexOf(level);
+                
+
+                const option = document.createElement('div');
+                option.className = 'quality-option';
+                option.dataset.level = originalIndex;  // 使用原始索引
+                option.innerHTML = '<span class="quality-option-label">' + quality + '</span>';
+
+                // 显示分辨率信息
+                const resolution = level.width + 'x' + level.height;
+                option.innerHTML += '<span class="quality-option-auto" style="font-size: 10px; opacity: 0.5;">' + resolution + '</span>';
+
+                option.addEventListener('click', () => switchQuality(originalIndex));
+                dropdown.appendChild(option);
+            });
+
+            // 点击按钮显示/隐藏下拉菜单
+            qualityBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdown.classList.toggle('show');
+            });
+
+            // 点击其他地方关闭下拉菜单
+            document.addEventListener('click', (e) => {
+                if (!dropdown.contains(e.target) && e.target !== qualityBtn) {
+                    dropdown.classList.remove('show');
+                }
+            });
+
+            // 更新初始状态
+            updateQualitySelectorState(hls.currentLevel);
+        }
+
+        // 切换画质
+        function switchQuality(level) {
+            if (!currentHlsInstance) return;
+
+            const hls = currentHlsInstance;
+            const video = document.getElementById('video-player');
+            const qualityBtn = document.getElementById('quality-btn');
+            const loadingOverlay = document.getElementById('player-loading-overlay');
+
+            // 获取当前和目标画质信息
+            const currentLevel = hls.currentLevel;
+            const targetLevel = level;
+            const currentQuality = currentLevel >= 0 ? getQualityLabel(hls.levels[currentLevel]?.width, hls.levels[currentLevel]?.height) : 'AUTO';
+            const targetQuality = targetLevel === -1 ? 'AUTO' : getQualityLabel(hls.levels[targetLevel]?.width, hls.levels[targetLevel]?.height);
+
+            // 如果切换到相同画质，直接返回
+            if (currentLevel === targetLevel) {
+                return;
+            }
+
+            let switchCompleted = false;
+
+            // 添加切换状态样式
+            if (qualityBtn) {
+                qualityBtn.classList.add('switching');
+            }
+
+            // 显示播放器加载遮罩
+            if (loadingOverlay) {
+                loadingOverlay.classList.add('show');
+            }
+
+            // 立即设置画质（HLS.js 会平滑切换）
+            hls.currentLevel = level;
+
+            // 更新UI
+            updateQualitySelectorState(level);
+
+            const qualityBtnLabel = document.getElementById('quality-btn-label');
+            if (level === -1) {
+                qualityBtnLabel.textContent = 'AUTO';
+            } else {
+                const levelData = hls.levels[level];
+                if (levelData) {
+                    const quality = getQualityLabel(levelData.width, levelData.height);
+                    qualityBtnLabel.textContent = quality;
+                }
+            }
+
+            // 完成切换的清理函数
+            const completeSwitch = function() {
+                if (switchCompleted) return;
+                switchCompleted = true;
+
+                video.removeEventListener('hlsLevelSwitched', onSwitched);
+
+                // 移除切换状态样式
+                if (qualityBtn) {
+                    qualityBtn.classList.remove('switching');
+                }
+
+                // 隐藏加载遮罩
+                if (loadingOverlay) {
+                    loadingOverlay.classList.remove('show');
+                }
+
+                // 显示成功提示
+                Toast.success('已切换到 ' + targetQuality, 1500);
+            };
+
+            // 监听切换完成事件
+            const onSwitched = function() {
+                completeSwitch();
+            };
+
+            // 监听 hlsLevelSwitched 事件
+            video.addEventListener('hlsLevelSwitched', onSwitched);
+
+            // 超时移除 loading（防止事件未触发）
+            setTimeout(() => {
+                completeSwitch();
+            }, 1500);
+        }
+
+        // 更新画质选择器状态
+        function updateQualitySelectorState(currentLevel) {
+            const dropdown = document.getElementById('quality-dropdown');
+            if (!dropdown) return;
+
+            // 移除所有active类
+            const options = dropdown.querySelectorAll('.quality-option');
+            options.forEach(opt => opt.classList.remove('active'));
+
+            // 添加active类到当前选中的选项
+            const activeOption = dropdown.querySelector('.quality-option[data-level="' + currentLevel + '"]');
+            if (activeOption) {
+                activeOption.classList.add('active');
+            }
+        }
+
+        // 显示/隐藏画质选择器
+        function toggleQualitySelector(show) {
+            const selector = document.getElementById('quality-selector');
+            const qualityBtn = document.getElementById('quality-btn');
+            if (selector && qualityBtn) {
+                selector.style.display = show ? 'flex' : 'none';
+            }
+        }
+
+        // 获取URL参数
+        function getUrlParam(name) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(name);
+        }
+
+        // 加载数据
+        async function loadData() {
+            try {
+                const response = await fetch('/api/videos');
+                videoData = await response.json();
+
+                const videoId = parseInt(getUrlParam('id')) || 0;
+                currentVideo = videoData.videos.find(v => v.id === videoId) || videoData.videos[0];
+
+
+                if (!currentVideo) {
+                    document.getElementById('loading').textContent = '未找到该视频';
+                    return;
+                }
+
+                // 获取集数参数
+                const episodeParam = getUrlParam('episode');
+                const episodeIndex = episodeParam ? parseInt(episodeParam) : 0;
+
+                renderPage();
+                initPlayer();
+
+                // 加载并播放视频
+                const episodes = (currentVideo.episodes && currentVideo.episodes.length > 0)
+                    ? currentVideo.episodes
+                    : [{
+                        id: currentVideo.id,
+                        path: currentVideo.path,
+                        title: currentVideo.type === 'video' ? '完整视频' : '播放',
+                        duration: currentVideo.durationTag || '--:--'
+                    }];
+
+
+                // 加载指定集数的视频
+                if (episodes[episodeIndex]) {
+                    loadVideo(episodes[episodeIndex].path);
+                }
+
+                // 更新集数高亮
+                if (episodeIndex > 0) {
+                    const episodeItems = document.querySelectorAll('.episode-item');
+                    episodeItems.forEach((ep, i) => {
+                        if (i === episodeIndex) {
+                            ep.classList.add('active');
+                        } else {
+                            ep.classList.remove('active');
+                        }
+                    });
+                    currentEpisode = episodeIndex;
+                }
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('app').style.display = 'grid';
+            } catch (error) {
+                document.getElementById('loading').textContent = '加载失败，请重试';
+            }
+        }
+
+        // 渲染页面
+        function renderPage() {
+            // 视频信息
+            document.getElementById('video-title').textContent = currentVideo.title;
+            document.getElementById('video-views').textContent = currentVideo.meta.split('·')[0].trim();
+            document.getElementById('video-date').textContent = currentVideo.meta.split('·')[1]?.trim() || '刚刚';
+
+            // 设置播放器封面背景图片
+            const cover = document.getElementById('player-cover');
+            if (currentVideo.cover) {
+                cover.style.setProperty('--cover-image', `url('${currentVideo.cover}')`);
+            }
+
+            // 设置视频技术信息 - 更新弹窗数据和显示/隐藏元数据按钮
+            const metadataToggleBtn = document.getElementById('metadata-toggle-btn');
+            if (currentVideo.width || currentVideo.duration || currentVideo.size) {
+                // 显示元数据按钮
+                if (metadataToggleBtn) {
+                    metadataToggleBtn.style.display = 'inline-flex';
+                }
+
+                // 分辨率
+                const modalResolutionEl = document.getElementById('modal-tech-resolution');
+                if (modalResolutionEl) {
+                    if (currentVideo.width && currentVideo.height) {
+                        modalResolutionEl.textContent = `${currentVideo.width} × ${currentVideo.height}`;
+                    } else {
+                        modalResolutionEl.textContent = '-';
+                    }
+                }
+
+                // 时长
+                const modalDurationEl = document.getElementById('modal-tech-duration');
+                if (modalDurationEl) {
+                    if (currentVideo.duration) {
+                        const mins = Math.floor(currentVideo.duration / 60);
+                        const secs = Math.floor(currentVideo.duration % 60);
+                        const hrs = Math.floor(mins / 60);
+                        const minsPart = mins % 60;
+                        if (hrs > 0) {
+                            modalDurationEl.textContent = `${hrs}:${minsPart.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                        } else {
+                            modalDurationEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+                        }
+                    } else {
+                        modalDurationEl.textContent = '-';
+                    }
+                }
+
+                // 大小
+                const modalSizeEl = document.getElementById('modal-tech-size');
+                if (modalSizeEl) {
+                    modalSizeEl.textContent = currentVideo.size || '-';
+                }
+
+                // 编码
+                const modalCodecEl = document.getElementById('modal-tech-codec');
+                if (modalCodecEl) {
+                    modalCodecEl.textContent = currentVideo.codec ? currentVideo.codec.toUpperCase() : '-';
+                }
+
+                // 比特率
+                const modalBitrateEl = document.getElementById('modal-tech-bitrate');
+                if (modalBitrateEl) {
+                    modalBitrateEl.textContent = currentVideo.bitrate || '-';
+                }
+
+                // 帧率
+                const modalFpsEl = document.getElementById('modal-tech-fps');
+                if (modalFpsEl) {
+                    modalFpsEl.textContent = currentVideo.fps ? `${currentVideo.fps} fps` : '-';
+                }
+            } else {
+                // 隐藏元数据按钮
+                if (metadataToggleBtn) {
+                    metadataToggleBtn.style.display = 'none';
+                }
+            }
+
+            if (currentVideo.description) {
+                document.getElementById('video-description').textContent = currentVideo.description;
+            }
+
+            // 集数列表 - 所有视频都显示
+            const episodesCard = document.getElementById('episodes-card');
+            const episodesList = document.getElementById('episodes-list');
+
+            if (!episodesCard || !episodesList) {
+                return;
+            }
+
+            // 如果没有集数，创建一个默认集数
+            const episodes = (currentVideo.episodes && currentVideo.episodes.length > 0)
+                ? currentVideo.episodes
+                : [{
+                    id: currentVideo.id,
+                    path: currentVideo.path,
+                    title: currentVideo.type === 'video' ? '完整视频' : '播放',
+                    duration: currentVideo.durationTag || '--:--'
+                }];
+
+            episodesCard.style.display = 'flex';
+            document.getElementById('episode-total').textContent = `共${episodes.length}集`;
+
+            episodesList.innerHTML = episodes.map((ep, index) => `
+                <div class="episode-item ${index === 0 ? 'active' : ''}" onclick="playEpisode(${index})" data-episode="${index}">
+                    <div class="ep-thumb">
+                        <img src="${ep.cover || currentVideo.cover}" alt="${ep.title}" loading="lazy">
+                        <span class="ep-duration">${ep.duration}</span>
+                    </div>
+                    <div class="ep-info">
+                        <div class="ep-title">${ep.title}</div>
+                        <div class="ep-time">${ep.duration}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            // 推荐列表
+            const recList = document.getElementById('rec-list');
+            if (!recList) {
+                return;
+            }
+
+            const recommendations = videoData.videos.filter(v => v.id !== currentVideo.id).slice(0, 5);
+
+            if (recommendations.length === 0) {
+                recList.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 20px;">暂无推荐视频</div>';
+            } else {
+                recList.innerHTML = recommendations.map(video => `
+                    <a href="/play.html?id=${video.id}" class="rec-item" target="_self">
+                        <div class="rec-thumb">
+                            <img src="${video.cover}" alt="${video.title}" loading="lazy">
+                            <span class="rec-duration">${video.durationTag}</span>
+                        </div>
+                        <div class="rec-info">
+                            <div class="rec-title">${video.title}</div>
+                            <div class="rec-meta">${video.meta}</div>
+                        </div>
+                    </a>
+                `).join('');
+            }
+        }
+
+        // 初始化播放器（只执行一次）
+        function initPlayer() {
+            if (playerInitialized) return;
+
+            const video = document.getElementById('video-player');
+            const container = document.getElementById('video-container');
+            const cover = document.getElementById('player-cover');
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            const progressBar = document.getElementById('progress-bar');
+            const progressCurrent = document.getElementById('progress-current');
+            const progressPreview = document.getElementById('progress-preview');
+            const currentTimeEl = document.getElementById('current-time');
+            const durationEl = document.getElementById('duration');
+            const muteBtn = document.getElementById('mute-btn');
+            const volumeSlider = document.getElementById('volume-slider');
+            const volumeCurrent = document.getElementById('volume-current');
+            const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+            let isPlaying = false;
+            let previousVolume = 0.7;
+
+            // 设置初始音量
+            video.volume = previousVolume;
+            volumeCurrent.style.width = `${previousVolume * 100}%`;
+
+            // 格式化时间
+            function formatTime(seconds) {
+                if (isNaN(seconds)) return '0:00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            // 播放/暂停
+            function togglePlay() {
+                if (video.paused) {
+                    video.play().catch(err => {
+                    });
+                } else {
+                    video.pause();
+                }
+            }
+
+            video.addEventListener('play', () => {
+                isPlaying = true;
+                cover.classList.add('hidden');
+                container.classList.add('playing');
+                updatePlayPauseIcon(true);
+            });
+
+            video.addEventListener('pause', () => {
+                isPlaying = false;
+                container.classList.remove('playing');
+                updatePlayPauseIcon(false);
+            });
+
+            function updatePlayPauseIcon(playing) {
+                const playIcon = document.getElementById('play-icon');
+                if (playing) {
+                    playIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+                } else {
+                    playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+                }
+            }
+
+            // 点击封面播放
+            cover.addEventListener('click', togglePlay);
+            playPauseBtn.addEventListener('click', togglePlay);
+
+            // 进度更新 - 拖动时不更新
+            video.addEventListener('timeupdate', () => {
+                if (!isDraggingProgress && !isNaN(video.duration) && video.duration > 0 && video.duration !== Infinity) {
+                    const progress = (video.currentTime / video.duration) * 100;
+                    progressCurrent.style.width = `${progress}%`;
+                    currentTimeEl.textContent = formatTime(video.currentTime);
+                }
+            });
+
+            video.addEventListener('loadedmetadata', () => {
+                if (!isNaN(video.duration) && video.duration !== Infinity) {
+                    durationEl.textContent = formatTime(video.duration);
+
+                    // 视频元数据加载完成后，如果有待应用的进度，应用它
+                    if (pendingSeekPercent !== null) {
+                        video.currentTime = pendingSeekPercent * video.duration;
+                        pendingSeekPercent = null;
+                    }
+                }
+            });
+
+            // 进度条跳转函数
+            function seekToProgress(clientX) {
+                const rect = progressBar.getBoundingClientRect();
+                let percent = (clientX - rect.left) / rect.width;
+                percent = Math.max(0, Math.min(1, percent));
+                progressCurrent.style.width = `${percent * 100}%`;
+
+                // 计算预览时间
+                const previewTime = !isNaN(video.duration) ? percent * video.duration : 0;
+                progressPreview.textContent = formatTime(previewTime);
+                progressPreview.style.left = `${percent * 100}%`;
+                return percent;
+            }
+
+            // 应用进度跳转
+            function applySeek(percent) {
+                // 检查视频是否准备好
+                if (video.readyState >= 1 && !isNaN(video.duration) && video.duration > 0 && video.duration !== Infinity) {
+                    video.currentTime = percent * video.duration;
+                } else {
+                    // 视频还没加载完成，存储待应用的进度
+                    pendingSeekPercent = percent;
+                }
+            }
+
+            // 进度条拖动 - 鼠标按下
+            progressBar.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return; // 只响应左键
+                isDraggingProgress = true;
+                progressBar.classList.add('dragging');
+                const percent = seekToProgress(e.clientX);
+                applySeek(percent);
+            });
+
+            // 进度条拖动 - 鼠标移动（文档级别）
+            document.addEventListener('mousemove', (e) => {
+                if (isDraggingProgress) {
+                    e.preventDefault();
+                    const percent = seekToProgress(e.clientX);
+                    applySeek(percent);
+                }
+            });
+
+            // 进度条拖动 - 鼠标释放（文档级别）
+            document.addEventListener('mouseup', () => {
+                if (isDraggingProgress) {
+                    isDraggingProgress = false;
+                    progressBar.classList.remove('dragging');
+                }
+            });
+
+            // 进度条悬停预览
+            progressBar.addEventListener('mousemove', (e) => {
+                if (!isDraggingProgress) {
+                    const rect = progressBar.getBoundingClientRect();
+                    let percent = (e.clientX - rect.left) / rect.width;
+                    percent = Math.max(0, Math.min(1, percent));
+                    const duration = !isNaN(video.duration) && video.duration !== Infinity ? video.duration : 0;
+                    progressPreview.textContent = formatTime(percent * duration);
+                    progressPreview.style.left = `${percent * 100}%`;
+                }
+            });
+
+            // 静音控制
+            muteBtn.addEventListener('click', () => {
+                if (video.muted || video.volume === 0) {
+                    video.muted = false;
+                    video.volume = previousVolume || 0.7;
+                    volumeCurrent.style.width = `${video.volume * 100}%`;
+                    updateVolumeIcon(false);
+                } else {
+                    previousVolume = video.volume;
+                    video.muted = true;
+                    volumeCurrent.style.width = '0%';
+                    updateVolumeIcon(true);
+                }
+            });
+
+            // 音量调节函数
+            function setVolume(clientX) {
+                const rect = volumeSlider.getBoundingClientRect();
+                let percent = (clientX - rect.left) / rect.width;
+                percent = Math.max(0, Math.min(1, percent));
+                video.volume = percent;
+                video.muted = false;
+                volumeCurrent.style.width = `${percent * 100}%`;
+                updateVolumeIcon(percent === 0);
+                if (percent > 0) previousVolume = percent;
+            }
+
+            // 音量滑块拖动 - 鼠标按下
+            volumeSlider.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                isDraggingVolume = true;
+                volumeSlider.classList.add('dragging');
+                setVolume(e.clientX);
+            });
+
+            // 音量滑块拖动 - 鼠标移动（文档级别）
+            document.addEventListener('mousemove', (e) => {
+                if (isDraggingVolume) {
+                    e.preventDefault();
+                    setVolume(e.clientX);
+                }
+            });
+
+            // 音量滑块拖动 - 鼠标释放（文档级别）
+            document.addEventListener('mouseup', () => {
+                if (isDraggingVolume) {
+                    isDraggingVolume = false;
+                    volumeSlider.classList.remove('dragging');
+                }
+            });
+
+            function updateVolumeIcon(muted) {
+                const volumeIcon = document.getElementById('volume-icon');
+                if (muted || video.volume === 0) {
+                    volumeIcon.innerHTML = '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.41.93-2.2.1V12c0-3.31-2.69-6-6-6zM7.73 9 7 9.73V15h2.73L7.73 9z"/>';
+                } else if (video.volume < 0.5) {
+                    volumeIcon.innerHTML = '<path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM3 9v6h4l5 5V4L7 9H3z"/>';
+                } else {
+                    volumeIcon.innerHTML = '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>';
+                }
+            }
+
+            // 全屏控制
+            fullscreenBtn.addEventListener('click', () => {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                } else {
+                    container.requestFullscreen();
+                }
+            });
+
+            // 键盘控制
+            document.addEventListener('keydown', (e) => {
+                // 如果焦点在输入框等元素上，不响应
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    togglePlay();
+                } else if (e.code === 'ArrowLeft') {
+                    video.currentTime = Math.max(0, video.currentTime - 5);
+                } else if (e.code === 'ArrowRight') {
+                    video.currentTime = Math.min(video.duration, video.currentTime + 5);
+                } else if (e.code === 'ArrowUp') {
+                    e.preventDefault();
+                    video.volume = Math.min(1, video.volume + 0.1);
+                    volumeCurrent.style.width = `${video.volume * 100}%`;
+                    updateVolumeIcon(false);
+                } else if (e.code === 'ArrowDown') {
+                    e.preventDefault();
+                    video.volume = Math.max(0, video.volume - 0.1);
+                    volumeCurrent.style.width = `${video.volume * 100}%`;
+                    updateVolumeIcon(video.volume === 0);
+                } else if (e.code === 'KeyM') {
+                    muteBtn.click();
+                } else if (e.code === 'KeyF') {
+                    fullscreenBtn.click();
+                } else if (e.code === 'Slash' || e.key === '?') {
+                    e.preventDefault();
+                    const keyboardHelpOverlay = document.getElementById('keyboard-help-overlay');
+                    if (keyboardHelpOverlay) {
+                        keyboardHelpOverlay.classList.toggle('active');
+                        document.body.style.overflow = keyboardHelpOverlay.classList.contains('active') ? 'hidden' : '';
+                    }
+                } else if (e.code >= 'Digit0' && e.code <= 'Digit9') {
+                    // 数字键 0-9 跳转到对应进度
+                    const percent = parseInt(e.code.replace('Digit', '')) / 10;
+                    video.currentTime = percent * video.duration;
+                }
+            });
+
+            // 视频加载完成后的回调
+            video.addEventListener('canplay', () => {
+            });
+
+            video.addEventListener('error', (e) => {
+                // 只在真正播放失败时显示错误，不是在切换源时
+                if (video.src && video.src !== window.location.href) {
+                    Toast.error('视频加载失败，请稍后重试');
+                    const videoTitle = document.getElementById('video-title');
+                    videoTitle.textContent = '视频加载失败';
+                }
+            });
+
+            // 元数据弹窗事件监听
+            const metadataToggleBtn = document.getElementById('metadata-toggle-btn');
+            const metadataModalOverlay = document.getElementById('metadata-modal-overlay');
+            const metadataModalClose = document.getElementById('metadata-modal-close');
+
+            if (metadataToggleBtn && metadataModalOverlay && metadataModalClose) {
+                // 打开弹窗
+                metadataToggleBtn.addEventListener('click', () => {
+                    metadataModalOverlay.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                });
+
+                // 关闭弹窗
+                metadataModalClose.addEventListener('click', () => {
+                    metadataModalOverlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                });
+
+                // 点击遮罩关闭
+                metadataModalOverlay.addEventListener('click', (e) => {
+                    if (e.target === metadataModalOverlay) {
+                        metadataModalOverlay.classList.remove('active');
+                        document.body.style.overflow = '';
+                    }
+                });
+
+                // ESC 键关闭
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && metadataModalOverlay.classList.contains('active')) {
+                        metadataModalOverlay.classList.remove('active');
+                        document.body.style.overflow = '';
+                    }
+                });
+            }
+
+            // 键盘快捷键帮助弹窗事件监听
+            const keyboardHelpBtn = document.getElementById('keyboard-help-btn');
+            const keyboardHelpOverlay = document.getElementById('keyboard-help-overlay');
+            const keyboardHelpClose = document.getElementById('keyboard-help-close');
+
+            if (keyboardHelpBtn && keyboardHelpOverlay && keyboardHelpClose) {
+                // 打开帮助弹窗
+                keyboardHelpBtn.addEventListener('click', () => {
+                    keyboardHelpOverlay.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                });
+
+                // 关闭帮助弹窗
+                keyboardHelpClose.addEventListener('click', () => {
+                    keyboardHelpOverlay.classList.remove('active');
+                    document.body.style.overflow = '';
+                });
+
+                // 点击遮罩关闭
+                keyboardHelpOverlay.addEventListener('click', (e) => {
+                    if (e.target === keyboardHelpOverlay) {
+                        keyboardHelpOverlay.classList.remove('active');
+                        document.body.style.overflow = '';
+                    }
+                });
+
+                // ESC 键关闭
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && keyboardHelpOverlay.classList.contains('active')) {
+                        keyboardHelpOverlay.classList.remove('active');
+                        document.body.style.overflow = '';
+                    }
+                });
+            }
+
+            // 标记播放器已初始化
+            playerInitialized = true;
+        }
+
+        // 加载视频
+        async function loadVideo(episodePath) {
+
+            // 保存当前视频路径
+            currentVideoPath = episodePath;
+
+            const video = document.getElementById('video-player');
+            const cover = document.getElementById('player-cover');
+            const progressCurrent = document.getElementById('progress-current');
+            const currentTimeEl = document.getElementById('current-time');
+            const durationEl = document.getElementById('duration');
+
+            // 重置播放器状态
+            video.pause();
+            video.currentTime = 0;
+            cover.classList.remove('hidden');
+
+            // 停止 HLS 状态轮询
+            if (hlsCheckInterval) {
+                clearInterval(hlsCheckInterval);
+                hlsCheckInterval = null;
+            }
+
+            // 重置封面消息
+            const messageEl = document.getElementById('cover-message');
+            messageEl.style.display = 'none';
+            messageEl.style.color = '#fff';
+            messageEl.textContent = '';
+
+            // 重置进度条显示
+            progressCurrent.style.width = '0%';
+            currentTimeEl.textContent = '0:00';
+            durationEl.textContent = '0:00';
+
+            // 重置待应用的进度
+            pendingSeekPercent = null;
+            isUsingHls = false;
+
+            // 停止之前的流（如果存在）
+            if (window.currentStreamInfo) {
+                try {
+                    await fetch(`/api/videos/${window.currentStreamInfo.streamId}/stop-stream`, { method: 'POST' });
+                } catch (e) {
+                }
+                window.currentStreamInfo = null;
+            }
+
+            // 显示加载消息
+            messageEl.textContent = '正在启动视频流...';
+            messageEl.style.display = 'block';
+
+            try {
+                // 使用 episodePath 调用新的流式 API
+                const streamRes = await fetch(`/api/stream?path=${encodeURIComponent(episodePath)}`);
+
+                if (!streamRes.ok) {
+                    const errorText = await streamRes.text();
+                    throw new Error(`获取流地址失败 (${streamRes.status}): ${errorText}`);
+                }
+
+                const streamData = await streamRes.json();
+
+                // 保存 videoId 用于 HLS 状态查询
+                currentStreamVideoId = streamData.videoId;
+
+                // 保存流信息用于后续停止
+                // 注意: stop-stream 需要使用 streamId (hash-based)，而不是 videoId (database ID)
+                window.currentStreamInfo = {
+                    videoId: streamData.videoId,     // 数据库 ID，用于 HLS 状态查询
+                    streamId: streamData.streamId,   // 流跟踪 ID，用于停止流
+                    path: episodePath
+                };
+
+                // 先检查 HLS 是否已经可用
+                messageEl.textContent = '正在检查 HLS 缓存...';
+                messageEl.style.display = 'block';
+
+                const hlsStatusRes = await fetch(`/api/videos/${streamData.videoId}/hls-status`);
+                if (hlsStatusRes.ok) {
+                    const hlsStatus = await hlsStatusRes.json();
+
+                    if (hlsStatus.isComplete) {
+                        messageEl.textContent = '正在加载高清视频...';
+                        // 直接使用 HLS 播放
+                        await switchToHlsPlayer();
+                        return;
+                    }
+                }
+
+                // HLS 不可用，使用直接视频文件 URL
+                const videoUrl = `${window.location.origin}${streamData.directUrl}`;
+                window.currentStreamUrl = videoUrl;
+
+                // 隐藏消息
+                messageEl.style.display = 'none';
+
+                // 隐藏画质选择器（直连模式不支持画质切换）
+                toggleQualitySelector(false);
+
+                // 使用原生 video 标签播放视频
+                video.src = videoUrl;
+                video.load();
+
+                video.addEventListener('loadedmetadata', () => {
+
+                    // 获取视频分辨率并更新质量指示器
+                    const quality = getQualityLabel(video.videoWidth, video.videoHeight);
+                    updateQualityIndicator(quality, 'direct');
+                    
+
+                    cover.classList.add('hidden');
+                    video.play().catch(err => {
+                    });
+
+                    // 开始轮询 HLS 状态
+                    startHlsStatusCheck();
+                });
+
+                video.addEventListener('error', (e) => {
+                    messageEl.textContent = '视频加载失败，请检查文件格式';
+                    messageEl.style.color = '#ff4444';
+                    messageEl.style.display = 'block';
+                });
+
+            } catch (error) {
+                messageEl.textContent = `加载失败: ${error.message}`;
+                messageEl.style.display = 'block';
+                messageEl.style.color = '#ff4444';
+            }
+        }
+
+        // ==================== HLS 辅助函数 ====================
+        // HLS 状态轮询
+        function startHlsStatusCheck() {
+            if (!currentStreamVideoId) return;
+
+            // 立即检查一次
+            checkHlsStatus();
+
+            // 每 5 秒检查一次
+            hlsCheckInterval = setInterval(checkHlsStatus, 5000);
+        }
+
+        async function checkHlsStatus() {
+            if (!currentStreamVideoId || isUsingHls) return;
+
+            try {
+                const response = await fetch(`/api/videos/${currentStreamVideoId}/hls-status`);
+                if (!response.ok) return;
+
+                const status = await response.json();
+
+                if (status.isComplete) {
+                    switchToHlsPlayer();
+                } else {
+                }
+            } catch (error) {
+            }
+        }
+
+        // 切换到 HLS 播放器
+        async function switchToHlsPlayer() {
+            if (isUsingHls) return;
+
+            const video = document.getElementById('video-player');
+            const cover = document.getElementById('player-cover');
+            const messageEl = document.getElementById('cover-message');
+
+            // 停止轮询
+            if (hlsCheckInterval) {
+                clearInterval(hlsCheckInterval);
+                hlsCheckInterval = null;
+            }
+
+            // 记录当前播放位置
+            const currentTime = video.currentTime;
+
+            // 停止当前播放（但不清空源，避免触发 error 事件）
+            video.pause();
+
+            // 停止实时流
+            if (window.currentStreamInfo) {
+                try {
+                    await fetch(`/api/videos/${window.currentStreamInfo.streamId}/stop-stream`, { method: 'POST' });
+                } catch (e) {
+                }
+                window.currentStreamInfo = null;
+            }
+
+            // 初始化 HLS 播放器
+            const hlsUrl = `${window.location.origin}/hls/${encodeURIComponent(currentVideoPath)}/master.m3u8`;
+
+            if (Hls.isSupported()) {
+                const hls = new Hls({
+                    // 基础配置
+                    debug: false,
+                });
+
+                // 监听加载事件
+                hls.on(Hls.Events.LEVEL_LOADING, (event, data) => {
+                });
+
+                hls.on(Hls.Events.MANIFEST_LOADING, (event, data) => {
+                });
+
+                hls.on(Hls.Events.MANIFEST_LOADED, (event, data) => {
+                    data.levels.forEach((level, index) => {
+                        const quality = getQualityLabel(level.width, level.height);
+                        
+                    });
+                });
+
+                hls.on(Hls.Events.FRAG_LOADING, (event, data) => {
+                });
+
+                hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+                });
+
+
+                // 添加 video 元素错误监听
+                video.addEventListener('error', (e) => {
+                }, { once: true });
+
+                // 先添加所有监听器，再 loadSource
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    hls.levels.forEach((level, index) => {
+                        const bitrateK = Math.round(level.bitrate / 1000);
+                    });
+
+                    // 初始化画质选择器
+                    initQualitySelector(hls);
+                    toggleQualitySelector(true);
+
+                    // 监听质量水平变化
+                    hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+                        const level = hls.levels[data.level];
+                        if (level) {
+                            const quality = getQualityLabel(level.width, level.height);  // 修复参数顺序
+                            updateQualityIndicator(quality, 'hls');
+                            // 更新画质按钮标签
+                            document.getElementById('quality-btn-label').textContent = quality;
+                            // 更新下拉菜单选中状态
+                            updateQualitySelectorState(hls.currentLevel);
+                        } else {
+                            // 自动模式
+                            document.getElementById('quality-btn-label').textContent = 'AUTO';
+                            updateQualitySelectorState(-1);
+                        }
+                    });
+
+                    // 获取并显示当前质量水平
+                    const currentLevel = hls.levels[hls.currentLevel];
+                    if (currentLevel) {
+                        const quality = getQualityLabel(currentLevel.width, currentLevel.height);  // 修复参数顺序
+                        updateQualityIndicator(quality, 'hls');
+                        document.getElementById('quality-btn-label').textContent = quality;
+                    } else {
+                        // 自动模式下显示 "AUTO"
+                        updateQualityIndicator('AUTO', 'hls');
+                        document.getElementById('quality-btn-label').textContent = 'AUTO';
+                    }
+
+                    // 隐藏封面
+                    cover.classList.add('hidden');
+
+                    // 恢复播放位置
+                    if (currentTime > 0) {
+                        video.currentTime = currentTime;
+                    }
+
+                    video.play().catch(err => {
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+
+                    // 打印完整的错误信息
+                    if (data.error) {
+                    }
+                    if (data.response) {
+                    }
+                    if (data.context) {
+                    }
+
+                    // internalException 通常是由于 Worker 或配置问题
+                    if (data.details === 'internalException') {
+                    }
+
+                    if (data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                hls.destroy();
+                                // 尝试回退到直连播放
+                                messageEl.textContent = 'HLS 播放失败，切换到直连模式';
+                                messageEl.style.display = 'block';
+                                break;
+                        }
+                    }
+                });
+
+                // 所有监听器设置完成后，再加载源
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(video);
+
+                window.hlsPlayer = hls;
+                isUsingHls = true;
+
+                // 显示提示
+                messageEl.textContent = '已切换到高清模式';
+                messageEl.style.color = '#4caf50';
+                messageEl.style.display = 'block';
+                setTimeout(() => {
+                    messageEl.style.display = 'none';
+                }, 3000);
+
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari 原生支持
+                video.src = hlsUrl;
+
+                // Safari 原生 HLS 不支持画质切换 API，隐藏画质选择器
+                toggleQualitySelector(false);
+
+                video.addEventListener('loadedmetadata', () => {
+                    
+
+                    // 获取视频分辨率并更新质量指示器
+                    const quality = getQualityLabel(video.videoWidth, video.videoHeight);
+                    updateQualityIndicator(quality, 'hls');
+
+                    // 隐藏封面
+                    cover.classList.add('hidden');
+
+                    if (currentTime > 0) {
+                        video.currentTime = currentTime;
+                    }
+                    video.play().catch(err => {
+                    });
+                });
+                isUsingHls = true;
+            } else {
+            }
+        }
+
+        // 页面离开时停止视频流
+        window.addEventListener('beforeunload', () => {
+            // 停止 HLS 状态轮询
+            if (hlsCheckInterval) {
+                clearInterval(hlsCheckInterval);
+            }
+
+            // 停止实时流
+            if (window.currentStreamInfo) {
+                // 使用 sendBeacon 确保请求发送
+                navigator.sendBeacon(`/api/videos/${window.currentStreamInfo.streamId}/stop-stream`);
+            }
+
+            // 销毁 HLS 播放器
+            if (window.hlsPlayer) {
+                window.hlsPlayer.destroy();
+            }
+        });
+
+        // 页面隐藏时暂停播放
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                const video = document.getElementById('video-player');
+                if (video && !video.paused) {
+                    video.pause();
+                }
+            }
+        });
+
+        // 播放指定集数
+        let episodeClickTimer = null;
+        function playEpisode(index) {
+            const episodes = (currentVideo.episodes && currentVideo.episodes.length > 0)
+                ? currentVideo.episodes
+                : [{
+                    id: currentVideo.id,
+                    path: currentVideo.path,
+                    title: currentVideo.type === 'video' ? '完整视频' : '播放',
+                    duration: currentVideo.durationTag || '--:--'
+                }];
+
+            if (!episodes[index]) return;
+
+            // 使用 requestAnimationFrame 确保在下一次重绘时更新，避免闪动
+            requestAnimationFrame(() => {
+                currentEpisode = index;
+
+                // 更新集数高亮
+                const episodeItems = document.querySelectorAll('.episode-item');
+                episodeItems.forEach((ep, i) => {
+                    if (i === index) {
+                        ep.classList.add('active');
+                    } else {
+                        ep.classList.remove('active');
+                    }
+                });
+
+                // 更新标题
+                const title = episodes[index].title;
+                if (currentVideo.type === 'collection') {
+                    document.getElementById('video-title').textContent =
+                        `${currentVideo.title} - ${title}`;
+                } else {
+                    document.getElementById('video-title').textContent = currentVideo.title;
+                }
+
+                // 加载视频
+                loadVideo(episodes[index].path);
+            });
+        }
+
+        // 页面加载时执行
+        loadData();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级视频列表 - 叠放效果版</title>
+    <style>
+        :root {
+            --bg-color: #0f0f0f;
+            --card-bg: #1a1a1a;
+            --primary-color: #ff0000;
+            --text-main: #ffffff;
+            --text-dim: #aaaaaa;
+            --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+        }
+
+        /* 隐藏滚动条但保留滚动功能 */
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            display: none;
+        }
+
+        html,
+        body {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* ==================== 顶部导航 ==================== */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .toolbar h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        /* 搜索框 */
+        .search-container {
+            display: flex;
+            align-items: center;
+            position: relative;
+            z-index: 1000;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: var(--card-bg);
+            border-radius: 10px;
+            padding: 8px 16px;
+            width: 50px;
+            transition: width 0.3s ease;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .search-box.active {
+            width: 320px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .search-box input {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-main);
+            font-size: 14px;
+            width: 0;
+            flex: 1;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .search-box.active input {
+            width: auto;
+            opacity: 1;
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-dim);
+        }
+
+        .search-icon {
+            cursor: pointer;
+            padding: 4px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .search-icon svg {
+            width: 18px;
+            height: 18px;
+            fill: var(--text-dim);
+            transition: fill 0.3s ease;
+        }
+
+        .search-icon:hover svg {
+            fill: var(--text-main);
+        }
+
+        /* 搜索遮罩层 */
+        .search-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(2px);
+            z-index: 998;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition);
+        }
+
+        .search-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* 搜索结果下拉框 */
+        .search-results {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            min-width: 100%;
+            width: max-content;
+            max-width: 400px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            z-index: 1001;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: var(--transition);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .search-results.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .search-result-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: var(--transition);
+            border-bottom: 1px solid #222;
+        }
+
+        .search-result-item:last-child {
+            border-bottom: none;
+        }
+
+        .search-result-item:hover {
+            background: #252525;
+        }
+
+        .search-result-thumb {
+            width: 80px;
+            height: 45px;
+            object-fit: cover;
+            border-radius: 6px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .search-result-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .search-result-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-main);
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .search-result-meta {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .search-results-empty {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-dim);
+        }
+
+        /* 视图切换 */
+        .view-switch {
+            display: flex;
+            background: var(--card-bg);
+            padding: 4px;
+            border-radius: 10px;
+        }
+
+        .switch-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            padding: 8px 20px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: var(--transition);
+            font-size: 14px;
+        }
+
+        .switch-btn.active {
+            background: #333;
+            color: #fff;
+        }
+
+        /* --- 视图容器显示控制 --- */
+        .view-container {
+            display: none;
+        }
+
+        .view-container.active {
+            display: grid;
+        }
+
+        /* ==================== 网格视图 ==================== */
+        .grid-container {
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .grid-card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .grid-card::after {
+            content: "";
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            width: calc(100% + 0px);
+            height: calc(100% + 0px);
+            opacity: 0;
+            transition: var(--transition);
+            border-radius: 16px;
+            border: 2px solid transparent;
+            border-color: var(--primary-color);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .grid-card:hover {
+            transform: translateY(-10px);
+            background: #252525;
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .grid-card:hover::after {
+            opacity: 1;
+        }
+
+        .grid-thumb-area {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            border-radius: 12px;
+        }
+
+        .grid-main-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 14px;
+            position: relative;
+            z-index: 3;
+            background: #333;
+        }
+
+        /* 网格 - 合集堆叠层 */
+        .grid-stack-layer {
+            position: absolute;
+            width: 94%;
+            height: 100%;
+            border-radius: 12px;
+            left: 3%;
+            transition: var(--transition);
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .grid-stack-layer img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.6;
+        }
+
+        .grid-stack-layer-1 {
+            top: -6px;
+            z-index: 1;
+            transform: scale(0.96) translateY(-2px);
+        }
+
+        .grid-stack-layer-2 {
+            top: -12px;
+            width: 88%;
+            left: 6%;
+            z-index: 0;
+            transform: scale(0.92) translateY(-4px);
+        }
+
+        .grid-is-collection:hover .grid-stack-layer-1 {
+            top: -10px;
+            transform: scale(0.96) translateY(-4px);
+        }
+
+        .grid-is-collection:hover .grid-stack-layer-2 {
+            top: -20px;
+            transform: scale(0.92) translateY(-8px);
+        }
+
+        /* 网格 - 标签 */
+        .grid-duration-tag {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            z-index: 4;
+        }
+
+        .grid-collection-count {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 4px;
+            z-index: 4;
+        }
+
+        /* 网格 - 信息区域 */
+        .grid-info-area {
+            padding: 15px;
+        }
+
+        .grid-video-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            line-clamp: 2;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.4;
+        }
+
+        .grid-video-meta {
+            font-size: 13px;
+            color: var(--text-dim);
+        }
+
+        /* ==================== 列表视图 ==================== */
+        .list-container {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        .list-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+            display: flex;
+            padding: 16px;
+            gap: 20px;
+        }
+
+        .list-card:hover {
+            background: #252525;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .list-thumb-area {
+            width: 320px;
+            flex-shrink: 0;
+            font-size: 0;
+            position: relative;
+        }
+
+        .list-is-collection .list-thumb-area {
+            margin-top: 20px;
+        }
+
+        .list-main-img {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            border-radius: 8px;
+            background: #333;
+            position: relative;
+            z-index: 3;
+        }
+
+        /* 列表 - 合集堆叠层 */
+        .list-stack-layer {
+            position: absolute;
+            width: 94%;
+            height: 100%;
+            border-radius: 8px;
+            left: 3%;
+            transition: var(--transition);
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .list-stack-layer img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.5;
+        }
+
+        .list-stack-layer-1 {
+            top: -6px;
+            z-index: 1;
+            transform: scale(0.96) translateY(-2px);
+        }
+
+        .list-stack-layer-2 {
+            top: -12px;
+            width: 88%;
+            left: 6%;
+            z-index: 0;
+            transform: scale(0.92) translateY(-4px);
+        }
+
+        .list-is-collection:hover .list-stack-layer-1 {
+            top: -10px;
+            transform: scale(0.96) translateY(-4px);
+        }
+
+        .list-is-collection:hover .list-stack-layer-2 {
+            top: -20px;
+            transform: scale(0.92) translateY(-8px);
+        }
+
+        /* 列表 - 标签 */
+        .list-duration-tag {
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 3px 8px;
+            font-size: 12px;
+            border-radius: 4px;
+            z-index: 4;
+        }
+
+        .list-collection-count {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: var(--primary-color);
+            color: white;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 4px;
+            z-index: 4;
+        }
+
+        /* 列表 - 信息区域 */
+        .list-info-area {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            padding-top: 4px;
+        }
+
+        .list-video-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            line-height: 1.4;
+            color: var(--text-main);
+        }
+
+        .list-video-meta {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+        }
+
+        .list-video-description {
+            font-size: 14px;
+            color: #999;
+            line-height: 1.6;
+            display: -webkit-box;
+            line-clamp: 2;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        /* 列表 - 集数展开 */
+        .list-episodes-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: auto;
+        }
+
+        .episode-item {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .episode-item:hover {
+            background: #333;
+            border-color: var(--primary-color);
+            transform: translateY(-1px);
+        }
+
+        .episode-title {
+            color: var(--text-main);
+        }
+
+        .episode-duration {
+            color: var(--text-dim);
+            font-size: 11px;
+        }
+
+        /* ==================== 推荐板块 ==================== */
+        .recommend-section {
+            margin-top: 80px;
+            padding-top: 40px;
+            border-top: 1px solid #222;
+        }
+
+        .section-title {
+            font-size: 22px;
+            margin-bottom: 25px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+        }
+
+        .section-title::before {
+            content: "";
+            width: 4px;
+            height: 22px;
+            background: var(--primary-color);
+            margin-right: 12px;
+            border-radius: 2px;
+        }
+
+        .recommend-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .rec-card {
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .rec-card:hover {
+            transform: scale(1.05);
+        }
+
+        .rec-thumb {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #333;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            object-fit: cover;
+        }
+
+        .rec-title {
+            font-size: 14px;
+            font-weight: 500;
+            display: -webkit-box;
+            line-clamp: 2;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* 高亮动画 */
+        @keyframes highlight {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(255, 0, 0, 0);
+            }
+            50% {
+                box-shadow: 0 0 0 4px rgba(255, 0, 0, 0.5);
+            }
+        }
+
+        /* 响应式手机端 */
+        @media (max-width: 600px) {
+            .list-card {
+                flex-direction: column;
+            }
+
+            .list-thumb-area {
+                width: 100%;
+            }
+
+            .toolbar-left {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .search-box.active {
+                width: 200px;
+            }
+
+            .view-switch {
+                width: 100%;
+            }
+
+            .switch-btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- 搜索遮罩层 -->
+    <div class="search-overlay" id="search-overlay" onclick="closeSearch()"></div>
+
+    <div class="container">
+        <!-- 工具栏 -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <h1>我的库</h1>
+                <!-- 搜索框 -->
+                <div class="search-container">
+                    <div class="search-box" id="search-box">
+                        <input type="text" placeholder="搜索视频..." id="search-input" oninput="handleSearch(this.value)">
+                        <div class="search-icon" onclick="toggleSearch()">
+                            <svg viewBox="0 0 24 24">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                            </svg>
+                        </div>
+                        <!-- 搜索结果下拉 -->
+                        <div class="search-results" id="search-results"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="view-switch">
+                <button class="switch-btn active" onclick="setView('grid')">网格显示</button>
+                <button class="switch-btn" onclick="setView('list')">列表显示</button>
+            </div>
+        </div>
+
+        <!-- 网格视图容器 -->
+        <div class="view-container grid-container active" id="grid-view"></div>
+
+        <!-- 列表视图容器 -->
+        <div class="view-container list-container" id="list-view"></div>
+
+        <!-- 推荐区域 -->
+        <section class="recommend-section">
+            <h2 class="section-title">为你推荐</h2>
+            <div class="recommend-grid" id="recommend-list"></div>
+        </section>
+    </div>
+
+    <script>
+        // 共享数据
+        let videoData = null;
+
+        // ==================== 搜索功能 ====================
+        let searchTimeout = null;
+
+        function toggleSearch() {
+            const searchBox = document.getElementById('search-box');
+            const searchOverlay = document.getElementById('search-overlay');
+            const searchInput = document.getElementById('search-input');
+
+            if (searchBox.classList.contains('active')) {
+                closeSearch();
+            } else {
+                searchBox.classList.add('active');
+                searchOverlay.classList.add('active');
+                searchInput.focus();
+            }
+        }
+
+        function closeSearch() {
+            const searchBox = document.getElementById('search-box');
+            const searchOverlay = document.getElementById('search-overlay');
+            const searchInput = document.getElementById('search-input');
+            const searchResults = document.getElementById('search-results');
+
+            searchBox.classList.remove('active');
+            searchOverlay.classList.remove('active');
+            searchResults.classList.remove('active');
+            searchInput.value = '';
+        }
+
+        function handleSearch(value) {
+            const searchResults = document.getElementById('search-results');
+
+            // 清除之前的定时器
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
+            }
+
+            if (!value.trim()) {
+                searchResults.classList.remove('active');
+                return;
+            }
+
+            // 防抖处理
+            searchTimeout = setTimeout(() => {
+                const results = searchVideos(value.trim());
+                renderSearchResults(results);
+            }, 300);
+        }
+
+        function searchVideos(keyword) {
+            if (!videoData || !keyword) return [];
+
+            const lowerKeyword = keyword.toLowerCase();
+            return videoData.videos.filter(video => {
+                // 搜索标题
+                if (video.title.toLowerCase().includes(lowerKeyword)) {
+                    return true;
+                }
+                // 搜索描述
+                if (video.description && video.description.toLowerCase().includes(lowerKeyword)) {
+                    return true;
+                }
+                // 搜索集数标题
+                if (video.episodes) {
+                    return video.episodes.some(ep =>
+                        ep.title.toLowerCase().includes(lowerKeyword)
+                    );
+                }
+                return false;
+            });
+        }
+
+        function renderSearchResults(results) {
+            const searchResults = document.getElementById('search-results');
+
+            if (results.length === 0) {
+                searchResults.innerHTML = '<div class="search-results-empty">没有找到相关视频</div>';
+            } else {
+                searchResults.innerHTML = results.map(video => `
+                    <div class="search-result-item" onclick="selectVideo(${video.id})">
+                        <img src="${video.cover}" class="search-result-thumb" alt="${video.title}">
+                        <div class="search-result-info">
+                            <div class="search-result-title">${video.title}</div>
+                            <div class="search-result-meta">${video.meta}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            searchResults.classList.add('active');
+        }
+
+        function selectVideo(videoId) {
+            closeSearch();
+            // 直接跳转到播放页
+            playVideo(videoId);
+        }
+
+        // 点击页面其他地方关闭搜索
+        document.addEventListener('click', (e) => {
+            const searchBox = document.getElementById('search-box');
+            if (!searchBox.contains(e.target)) {
+                const searchResults = document.getElementById('search-results');
+                searchResults.classList.remove('active');
+            }
+        });
+
+        // ESC键关闭搜索
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeSearch();
+            }
+        });
+
+        // 模式切换
+        function setView(mode) {
+            const gridView = document.getElementById('grid-view');
+            const listView = document.getElementById('list-view');
+            const btns = document.querySelectorAll('.switch-btn');
+
+            // 更新按钮状态
+            btns.forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // 切换视图显示
+            if (mode === 'grid') {
+                gridView.classList.add('active');
+                listView.classList.remove('active');
+            } else {
+                gridView.classList.remove('active');
+                listView.classList.add('active');
+            }
+        }
+
+        // 点击集数播放（共享）
+        function playEpisode(videoId, episodeIndex) {
+            event.stopPropagation();
+            // 跳转到播放页面并播放对应集数
+            window.location.href = `/play.html?id=${videoId}&episode=${episodeIndex}`;
+        }
+
+        // 点击视频卡片跳转到播放页
+        function playVideo(videoId) {
+            window.location.href = `/play.html?id=${videoId}`;
+        }
+
+        // ==================== 网格视图渲染 ====================
+        function renderGridCard(video) {
+            const isCollection = video.type === 'collection';
+            const cardClass = isCollection ? 'grid-card grid-is-collection' : 'grid-card';
+
+            const stackLayers = isCollection ? `
+                <div class="grid-stack-layer grid-stack-layer-2">
+                    <img src="${video.cover}" alt="layer">
+                </div>
+                <div class="grid-stack-layer grid-stack-layer-1">
+                    <img src="${video.cover}" alt="layer">
+                </div>
+            ` : '';
+
+            const collectionCount = isCollection ? `<span class="grid-collection-count">${video.collectionCount}</span>` : '';
+
+            return `
+                <div class="${cardClass}" data-video-id="${video.id}" onclick="playVideo(${video.id})">
+                    <div class="grid-thumb-area">
+                        ${stackLayers}
+                        <img src="${video.cover}" class="grid-main-img" alt="cover">
+                        ${collectionCount}
+                        <span class="grid-duration-tag">${video.durationTag}</span>
+                    </div>
+                    <div class="grid-info-area">
+                        <div class="grid-video-title">${video.title}</div>
+                        <div class="grid-video-meta">${video.meta}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==================== 列表视图渲染 ====================
+        function renderListCard(video) {
+            const isCollection = video.type === 'collection';
+            const cardClass = isCollection ? 'list-card list-is-collection' : 'list-card';
+
+            const stackLayers = isCollection ? `
+                <div class="list-stack-layer list-stack-layer-2">
+                    <img src="${video.cover}" alt="layer">
+                </div>
+                <div class="list-stack-layer list-stack-layer-1">
+                    <img src="${video.cover}" alt="layer">
+                </div>
+            ` : '';
+
+            const collectionCount = isCollection ? `<span class="list-collection-count">${video.collectionCount}</span>` : '';
+
+            // 描述字段
+            const descriptionHtml = video.description ? `<div class="list-video-description">${video.description}</div>` : '';
+
+            const episodesHtml = isCollection && video.episodes ? `
+                <div class="list-episodes-list">
+                    ${video.episodes.map((ep, index) => `
+                        <div class="episode-item" onclick="playEpisode(${video.id}, ${index})">
+                            <span class="episode-title">${ep.title}</span>
+                            <span class="episode-duration">${ep.duration}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '';
+
+            return `
+                <div class="${cardClass}" data-video-id="${video.id}" onclick="playVideo(${video.id})">
+                    <div class="list-thumb-area">
+                        ${stackLayers}
+                        <img src="${video.cover}" class="list-main-img" alt="cover">
+                        ${collectionCount}
+                        <span class="list-duration-tag">${video.durationTag}</span>
+                    </div>
+                    <div class="list-info-area">
+                        <div class="list-video-title">${video.title}</div>
+                        <div class="list-video-meta">${video.meta}</div>
+                        ${descriptionHtml}
+                        ${episodesHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==================== 推荐卡片渲染 ====================
+        function renderRecCard(rec, index) {
+            // 使用索引映射到视频 ID（推荐数据 ID 和视频数据不匹配）
+            const videoId = (rec.id % 4) + 1; // 映射到 1-4
+            return `
+                <div class="rec-card" onclick="playVideo(${videoId})" style="cursor: pointer;">
+                    <img src="${rec.cover}" class="rec-thumb">
+                    <div class="rec-title">${rec.title}</div>
+                </div>
+            `;
+        }
+
+        // ==================== 数据加载 ====================
+        async function loadData() {
+            try {
+                const response = await fetch('/api/videos');
+                videoData = await response.json();
+
+                // 渲染网格视图
+                const gridView = document.getElementById('grid-view');
+                gridView.innerHTML = videoData.videos.map(video => renderGridCard(video)).join('');
+
+                // 渲染列表视图
+                const listView = document.getElementById('list-view');
+                listView.innerHTML = videoData.videos.map(video => renderListCard(video)).join('');
+
+                // 渲染推荐列表
+                const recommendList = document.getElementById('recommend-list');
+                recommendList.innerHTML = videoData.recommends.map((rec, index) => renderRecCard(rec, index)).join('');
+
+            } catch (error) {
+                console.error('加载数据失败:', error);
+            }
+        }
+
+        // 页面加载时获取数据
+        loadData();
+    </script>
+</body>
+
+</html>
