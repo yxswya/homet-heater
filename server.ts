@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serveStatic } from 'hono/bun'
-import { join, basename } from 'path';
+import { join, basename, relative } from 'path';
 import { existsSync, mkdirSync, statSync, writeFile, readFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { spawn } from 'child_process';
@@ -8,7 +8,7 @@ import { VideoScanner } from './services/video-scanner.js';
 import { config } from 'dotenv';
 import { videoOps, episodeOps, initializeDatabase, hlsCacheOps, db } from './db/index.js';
 import * as schema from './db/schema';
-import { TranscodeQueue, HLS_QUALITIES, transcodeToMultiBitrateHls, verifyHlsCache, cleanupIncompleteTranscode } from './services/transcode-service.js';
+import { TranscodeQueue, HLS_QUALITIES, transcodeToMultiBitrateHls, verifyHlsCache } from './services/transcode-service.js';
 
 // 加载环境变量
 config();
@@ -135,11 +135,11 @@ async function fetchWithRetry(url: string, retries = 1): Promise<any> {
         } catch (error: any) {
             // 处理超时和网络错误
             if (error.name === 'AbortError' || error.code === 20) {
-                console.log('fetchWithRetry: Request timed out');
+                console.log('fetchWithRetry: 请求超时');
                 return null;
             }
             if (i === retries - 1) {
-                console.log('fetchWithRetry: All retries failed');
+                console.log('fetchWithRetry: 所有重试失败');
                 return null;
             }
             await new Promise(r => setTimeout(r, 1000 * (i + 1)));
@@ -188,7 +188,7 @@ async function downloadTMDBImage(imagePath: string, type: 'poster' | 'backdrop')
         if (!existsSync(outputPath)) {
             writeFile(outputPath, buffer, (err) => {
                 if (err) {
-                    // Silent fail - image download is not critical
+                    // 静默失败 - 图片下载不是关键操作
                 }
             });
         }
@@ -449,7 +449,7 @@ async function extractThumbnail(videoPath: string, suffix?: string): Promise<str
 
 // 批量生成视频封面并获取 TMDB 元数据
 async function generateThumbnails(videos: any[]): Promise<void> {
-    console.log('generateThumbnails: Starting with', videos.length, 'videos');
+    console.log('generateThumbnails: 开始处理', videos.length, '个视频');
     const videoPaths: Array<{ video: any; fullPath: string; isCollection: boolean; isEpisode?: boolean; episode?: any }> = [];
 
     // 收集所有需要生成封面的视频路径
@@ -494,18 +494,18 @@ async function generateThumbnails(videos: any[]): Promise<void> {
     }
 
     if (videoPaths.length === 0) {
-        console.log('generateThumbnails: No videos to process');
+        console.log('generateThumbnails: 没有视频需要处理');
         return;
     }
 
-    console.log('generateThumbnails: Processing', videoPaths.length, 'video paths');
+    console.log('generateThumbnails: 正在处理', videoPaths.length, '个视频路径');
 
     let tmdbCount = 0;
     let screenshotCount = 0;
 
     for (let i = 0; i < videoPaths.length; i++) {
         const { video, fullPath, isCollection, isEpisode, episode } = videoPaths[i];
-        console.log(`generateThumbnails: Processing ${i + 1}/${videoPaths.length}:`, fullPath);
+        console.log(`generateThumbnails: 正在处理 ${i + 1}/${videoPaths.length}:`, fullPath);
 
         // 确定目标对象（合集本身 或 单个剧集）
         const targetObject = isEpisode ? episode : video;
@@ -514,9 +514,9 @@ async function generateThumbnails(videos: any[]): Promise<void> {
         // 1. 尝试从 TMDB 获取元数据和海报（仅对主视频和合集，不对单个剧集）
         let coverSet = false;
         if (!isEpisode && tmdbApiKey) {
-            console.log(`generateThumbnails: Fetching TMDB for ${filename}`);
+            console.log(`generateThumbnails: 正在从 TMDB 获取 ${filename}`);
             const metadata = await fetchTMDBMetadata(filename);
-            console.log(`generateThumbnails: TMDB result:`, !!metadata);
+            console.log(`generateThumbnails: TMDB 结果:`, !!metadata);
             if (metadata) {
                 // 添加元数据到视频对象
                 Object.assign(video, {
@@ -548,18 +548,15 @@ async function generateThumbnails(videos: any[]): Promise<void> {
         if (!coverSet) {
             // 为合集生成独立的封面（使用 'collection' 后缀）
             const suffix = isCollection ? 'collection' : undefined;
-            console.log(`generateThumbnails: Extracting thumbnail from ${fullPath}, suffix:`, suffix);
+            console.log(`generateThumbnails: 正在从 ${fullPath} 提取缩略图，后缀:`, suffix);
             const result = await extractThumbnail(fullPath, suffix);
-            console.log(`generateThumbnails: Thumbnail result:`, !!result);
+            console.log(`generateThumbnails: 缩略图结果:`, !!result);
 
             if (result) {
-                targetObject.cover = result.replace(process.cwd(), '');  // 转换为相对路径
-                if (targetObject.cover.startsWith('/')) {
-                    // 确保路径格式正确
-                    targetObject.cover = targetObject.cover;
-                } else {
-                    targetObject.cover = `/assets/covers/${result.split('/').pop()}`;
-                }
+                // 使用 path.relative 获取相对路径，确保跨平台兼容
+                const relativePath = relative(process.cwd(), result);
+                // 统一使用正斜杠作为路径分隔符（URL 标准）
+                targetObject.cover = '/' + relativePath.split(/[/\\]/).join('/');
                 targetObject.cover_source = 'screenshot';
                 screenshotCount++;
             }
@@ -603,30 +600,30 @@ async function generateThumbnails(videos: any[]): Promise<void> {
         }
     }
 
-    console.log('generateThumbnails: Complete, TMDB:', tmdbCount, 'Screenshots:', screenshotCount);
+    console.log('generateThumbnails: 完成，TMDB:', tmdbCount, '截图:', screenshotCount);
 }
 
 // 启动时扫描视频并更新数据库
 async function initializeVideoData() {
-    console.log('initializeVideoData: Starting...');
+    console.log('initializeVideoData: 正在启动...');
     // 检查 FFmpeg
     const hasFFmpeg = await checkFFmpeg();
-    console.log('initializeVideoData: FFmpeg check done, hasFFmpeg =', hasFFmpeg);
+    console.log('initializeVideoData: FFmpeg 检查完成，hasFFmpeg =', hasFFmpeg);
     if (!hasFFmpeg) {
-        console.log('FFmpeg not available');
+        console.log('FFmpeg 不可用');
     }
 
     try {
-        console.log('initializeVideoData: Creating scanner...');
+        console.log('initializeVideoData: 正在创建扫描器...');
         const scanner = new VideoScanner();
 
         // 临时存储扫描结果
         const scannedVideos: any[] = [];
         const recommends: any[] = [];
 
-        console.log('initializeVideoData: Scanning directory', videoFolderPath);
+        console.log('initializeVideoData: 正在扫描目录', videoFolderPath);
         await scanner['traverseDirectory'](videoFolderPath, scannedVideos, recommends, videoFolderPath);
-        console.log('initializeVideoData: Scan complete, found', scannedVideos.length, 'videos');
+        console.log('initializeVideoData: 扫描完成，找到', scannedVideos.length, '个视频');
 
 
         // 处理每个视频 - 检查数据库，确定需要处理的视频
@@ -635,13 +632,13 @@ async function initializeVideoData() {
         let skippedCount = 0;
         const videosToProcess: any[] = [];
 
-        console.log('initializeVideoData: Processing videos...');
+        console.log('initializeVideoData: 正在处理视频...');
 
         for (let i = 0; i < scannedVideos.length; i++) {
             const scannedVideo = scannedVideos[i];
-            console.log(`initializeVideoData: Processing video ${i + 1}/${scannedVideos.length}:`, scannedVideo.path);
+            console.log(`initializeVideoData: 正在处理视频 ${i + 1}/${scannedVideos.length}:`, scannedVideo.path);
             const existing = await videoOps.findByPath(scannedVideo.path);
-            console.log(`initializeVideoData: Video ${i + 1} query complete, exists:`, !!existing);
+            console.log(`initializeVideoData: 视频 ${i + 1} 查询完成，存在:`, !!existing);
 
             if (existing) {
                 // 视频已存在，检查是否需要处理
@@ -709,13 +706,13 @@ async function initializeVideoData() {
 
         // 处理需要获取元数据和/或封面的视频
         if (hasFFmpeg && videosToProcess.length > 0) {
-            console.log('initializeVideoData: Generating thumbnails for', videosToProcess.length, 'videos...');
+            console.log('initializeVideoData: 正在为', videosToProcess.length, '个视频生成缩略图...');
             await generateThumbnails(videosToProcess);
-            console.log('initializeVideoData: Thumbnails generated');
+            console.log('initializeVideoData: 缩略图生成完成');
         }
 
         // 将处理后的视频保存到数据库
-        console.log('initializeVideoData: Saving to database...');
+        console.log('initializeVideoData: 正在保存到数据库...');
         for (const video of videosToProcess) {
             const dbVideo: any = {
                 title: video.title,
@@ -766,12 +763,12 @@ async function initializeVideoData() {
             }
         }
 
-        console.log('initializeVideoData: All videos saved to database');
+        console.log('initializeVideoData: 所有视频已保存到数据库');
 
     } catch (error) {
         console.error('initializeVideoData: Error:', error);
     }
-    console.log('initializeVideoData: Complete');
+    console.log('initializeVideoData: 完成');
 }
 
 // ==================== 视频流服务（直接文件 + Range 支持）====================
@@ -895,10 +892,7 @@ async function triggerHlsTranscode(videoPath: string, fullPath: string, videoId:
     // 标记为正在转码
     transcodingVideos.add(cachePath);
 
-    // 清理不完整的转码
-    cleanupIncompleteTranscode(cachePath);
-
-    // 创建/更新缓存记录
+    // 创建/更新缓存记录（支持断点续传，不删除未完成的转码）
     await hlsCacheOps.upsert({
         videoId,
         cachePath,
@@ -950,7 +944,7 @@ app.get('/videos/:encodedPath', async (c) => {
             const range = parseRangeHeader(rangeHeader, fileSize);
 
             if (!range) {
-                return c.text('Requested Range Not Satisfiable', 416);
+                return c.text('请求范围不满足', 416);
             }
 
             // 读取指定范围的数据
@@ -1200,18 +1194,18 @@ app.use('/assets/backdrops/*', serveStatic({
 
 // 启动服务
 async function start() {
-    console.log('Starting server initialization...');
+    console.log('正在启动服务器初始化...');
     await initializeDatabase();
-    console.log('Database initialized');
+    console.log('数据库初始化完成');
     await initializeVideoData();
-    console.log('Video data initialized');
+    console.log('视频数据初始化完成');
 
     Bun.serve({
         fetch: app.fetch,
         port: port,
     });
 
-    console.log(`Server running on port ${port}`);
+    console.log(`服务器运行在端口 ${port}`);
 }
 
 start();

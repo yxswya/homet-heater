@@ -148,7 +148,7 @@ export async function transcodeToMultiBitrateHls(
   await generateMasterM3u8(cachePath, qualitiesToTranscode.map(q => q.name));
 }
 
-// 转码单个码率
+// 转码单个码率（支持断点续传）
 async function transcodeQuality(
   videoPath: string,
   qualityDir: string,
@@ -162,10 +162,27 @@ async function transcodeQuality(
 
   // 根据 fps 计算 GOP 大小 (2 秒)
   const gopSize = Math.round(fps * 2);
-  
+
+  // 检查是否已有部分转码（断点续传）
+  let startTime = 0;
+  let startNumber = 0;
+  let appendList = false;
+
+  const m3u8Path = join(qualityDir, 'index.m3u8');
+  if (existsSync(m3u8Path)) {
+    const m3u8Info = parseM3u8File(m3u8Path);
+
+    // 如果 m3u8 文件未完成，说明是中断的转码，可以继续
+    if (m3u8Info && !m3u8Info.hasEndList && m3u8Info.totalDuration > 0) {
+      startTime = m3u8Info.totalDuration;
+      startNumber = m3u8Info.segmentCount;
+      appendList = true;
+
+      console.log(`断点续传: ${quality.name} 从 ${startTime.toFixed(2)}秒 开始，已存在 ${startNumber} 个切片`);
+    }
+  }
 
   const args = [
-    '-y',
     '-i', videoPath,
     '-c:v', 'libx264',
     '-preset', 'fast',
@@ -184,17 +201,40 @@ async function transcodeQuality(
     '-f', 'hls',
     '-hls_time', '2',                    // 2秒切片（原6秒）- 更快的切换响应
     '-hls_list_size', '0',
-    '-hls_flags', 'independent_segments+delete_segments+program_date_time',  // 独立切片 + 程序日期时间
+  ];
+
+  // 断点续传：从指定时间点开始
+  if (startTime > 0) {
+    args.unshift('-ss', startTime.toFixed(2));
+    args.push(
+      '-hls_flags', 'append_list+independent_segments+program_date_time',
+      '-start_number', startNumber.toString()
+    );
+  } else {
+    // 首次转码：使用 epoch 时间作为起始编号，避免重启后文件名冲突
+    args.push(
+      '-hls_flags', 'independent_segments+program_date_time',
+      '-hls_start_number_source', 'epoch'
+    );
+  }
+
+  args.push(
     '-hls_segment_type', 'mpegts',
     '-hls_segment_filename', segmentPath,
-    '-hls_start_number_source', 'epoch',  // 使用epoch时间作为起始编号
     outputPath,
-  ];
+  );
+
+  // 首次转码时使用 -y 覆盖已有文件，断点续传时使用 -n 避免覆盖
+  if (startTime === 0) {
+    args.unshift('-y');
+  } else {
+    args.unshift('-n');
+  }
 
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn('ffmpeg', args);
     let started = false;
-    let lastProgress = 0;
+    let lastProgress = startTime;
 
     ffmpeg.stderr.on('data', (data) => {
       if (!started) {
@@ -213,7 +253,8 @@ async function transcodeQuality(
         // 使用实际视频时长计算进度，每 10 秒输出一次
         if (currentTime - lastProgress > 10) {
           lastProgress = currentTime;
-          progressCallback(quality.name, Math.min(currentTime / duration * 100, 99));
+          const totalProgress = Math.min((currentTime / duration) * 100, 99);
+          progressCallback(quality.name, totalProgress);
         }
       }
     });

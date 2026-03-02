@@ -52,3 +52,6 @@ hls-cache/
 *.db-shm
 *.db-wal
 video-library.db
+
+assets/
+migrations/
